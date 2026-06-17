@@ -37,7 +37,7 @@ if not os.path.exists(CSV_FILE):
 
 # בקשת קלט מהמשתמש לגבי האות שאוספים כעת
 letter = input("Enter the letter you want to collect (e.g. ALEF, BEIT, GIMEL or SPACE): ").strip().upper()
-num_samples = 100
+num_samples = 500
 samples_collected = 0
 
 # הגדרת אפשרויות מודל זיהוי הידיים (תמיכה בעד 2 ידיים)
@@ -61,8 +61,8 @@ HAND_CONNECTIONS = [
 cap = cv2.VideoCapture(0)
 
 print(f"Place your hand(s) in front of the camera and make the sign for {letter}...")
-print("Collection will start in 3 seconds...")
-time.sleep(3)
+print("Collection will start in 1 seconds...")
+time.sleep(1)
 print("Data collection started! Move your hand slightly (vary angles and distances)...")
 
 while samples_collected < num_samples:
