@@ -12,7 +12,7 @@ import time
 MODEL_PATH = 'hand_landmarker.task'
 PKL_MODEL_PATH = 'model.pkl'
 
-# מילון תרגום
+# מילון תרגום מאנגלית לעברית
 HEBREW_TRANSLATION = {
     'ALEF': 'א', 'BEIT': 'ב', 'GIMEL': 'ג', 'DALED': 'ד', 'HEI': 'ה',
     'VAV': 'ו', 'ZAIN': 'ז', 'CHET': 'ח', 'TET': 'ט', 'YOOD': 'י',
@@ -32,8 +32,8 @@ options = HandLandmarkerOptions(
 detector = vision.HandLandmarker.create_from_options(options)
 
 try:
-    font = ImageFont.truetype("arial.ttf", 35)
-    large_font = ImageFont.truetype("arial.ttf", 55)
+    font = ImageFont.truetype("arial.ttf", 26)
+    large_font = ImageFont.truetype("arial.ttf", 45)
 except IOError:
     font = ImageFont.load_default()
     large_font = ImageFont.load_default()
@@ -44,14 +44,16 @@ HAND_CONNECTIONS = [
     (15,16),(13,17),(17,18),(18,19),(19,20),(0,17)
 ]
 
-# משתנים לצבירת המשפט
+# משתני חוויית משתמש (UX) והיסטוריה
 current_sentence = ""
+last_saved_sentence = "None"  
 last_predicted_label = None
 label_stable_start_time = None
-REQUIRED_STABLE_TIME = 1.0  # זמן בשניות שצריך להחזיק את היד יציבה כדי שהאות תוקלד
+REQUIRED_STABLE_TIME = 1.2  
+confidence_pct = 0  
 
 cap = cv2.VideoCapture(0)
-print("האפליקציה החיה עם צבירת משפטים התחילה! (q ליציאה, c למחיקת משפט)")
+print("האפליקציה פועלת! לחיצה על S (או ד') תשמור את המשפט מיד.")
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -59,12 +61,16 @@ while cap.isOpened():
         break
 
     frame = cv2.flip(frame, 1)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    panel = np.zeros((220, frame.shape[1], 3), dtype=np.uint8)
+    frame = np.vstack((frame, panel))
+
+    rgb_frame = cv2.cvtColor(frame[:480, :], cv2.COLOR_BGR2RGB)
     mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
     results = detector.detect(mp_image)
 
     detected_text = "?"
-    
+    confidence_pct = 0
+
     if results.hand_landmarks:
         full_features = []
         for idx in range(2):
@@ -80,50 +86,70 @@ while cap.isOpened():
             else:
                 full_features.extend([0.0] * 63)
         
-        # זיהוי האות הנוכחית
         predicted_label = clf_model.predict([full_features])[0]
+        probabilities = clf_model.predict_proba([full_features])[0]
+        max_prob_idx = np.argmax(probabilities)
+        confidence_pct = int(probabilities[max_prob_idx] * 100)
+
         hebrew_letter = HEBREW_TRANSLATION.get(predicted_label, predicted_label)
         detected_text = hebrew_letter
 
-        # מנגנון טיימר לצבירת האותיות (Debounce)
         if predicted_label == last_predicted_label:
             if label_stable_start_time is not None:
-                elapsed = time.time() - label_stable_start_time
-                # אם עברה שנייה והאות עדיין יציבה
-                if elapsed >= REQUIRED_STABLE_TIME:
+                if time.time() - label_stable_start_time >= REQUIRED_STABLE_TIME:
                     current_sentence += hebrew_letter
-                    # מאפסים את הטיימר כדי שלא יקליד שוב בלולאה בלי להחליף אות
                     label_stable_start_time = None 
                     last_predicted_label = None
         else:
             last_predicted_label = predicted_label
             label_stable_start_time = time.time()
     else:
-        # אם אין יד על המסך, מאפסים את הטיימר
         last_predicted_label = None
         label_stable_start_time = None
 
-    # הכנת הטקסטים לתצוגה בעברית תקינה (RTL)
-    display_current = f"אות נוכחית: {get_display(detected_text)}"
-    display_sentence = f"משפט: {get_display(current_sentence)}"
-
-    # ציור בעזרת Pillow
+    # --- עיצוב גרפי וציור ה-UI ---
     img_pil = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
     draw = ImageDraw.Draw(img_pil)
     
-    # הצגת האות הנוכחית והמשפט המצטבר
-    draw.text((50, 30), display_current, font=font, fill=(255, 0, 0))
-    draw.text((50, 80), display_sentence, font=large_font, fill=(255, 255, 0))
-    
-    frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
+    draw.text((30, 490), f"Confidence: {confidence_pct}%", font=font, fill=(255, 255, 255))
+    draw.rectangle([250, 495, 450, 515], fill=(50, 50, 50))
+    draw.rectangle([250, 495, 250 + (confidence_pct * 2), 515], fill=(0, 120, 255))
 
+    draw.text((30, 530), "Current Sign: ", font=font, fill=(0, 255, 0))
+    draw.text((180, 530), get_display(detected_text), font=font, fill=(0, 255, 0))
+    
+    draw.text((30, 570), "Text: ", font=large_font, fill=(255, 255, 0))
+    draw.text((140, 570), get_display(current_sentence), font=large_font, fill=(255, 255, 0))
+    
+    draw.text((30, 640), "History: ", font=font, fill=(180, 180, 180))
+    draw.text((140, 640), get_display(last_saved_sentence), font=font, fill=(180, 180, 180))
+
+    # עדכון המקרא על המסך שיהיה ברור
+    instructions = "[SPACE] - Space | [X/ס] - Delete | [S/ד] - Save | [C/ב] - Clear | [Q] - Quit"
+    draw.text((20, 15), instructions, font=font, fill=(255, 255, 255))
+
+    frame = cv2.cvtColor(np.array(img_pil), cv2.COLOR_RGB2BGR)
     cv2.imshow('ASL Hebrew Real-Time Translator', frame)
     
+    # --- טיפול בכפתורי המקלדת (תומך גם בעברית וגם באנגלית!) ---
     key = cv2.waitKey(1) & 0xFF
-    if key == ord('q'):
+    
+    # בדיקת המקשים הלחוצים (כולל המקבילה שלהם בעברית במקלדת)
+    if key == ord('q') or key == ord('ת'):  
         break
-    elif key == ord('c'):
-        current_sentence = ""  # מחיקת המשפט בלחיצה על c
+    elif key == 32:  # מקש SPACE במקלדת
+        current_sentence += " "
+    elif key == ord('x') or key == ord('ס') or key == 8:  # מחיקת אות אחרונה (X או ס' או Backspace)
+        current_sentence = current_sentence[:-1]
+    elif key == ord('c') or key == ord('ב'):  # נקה הכל (C או ב')
+        current_sentence = ""
+    elif key == ord('s') or key == ord('ד'):  # שמירה (S או ד') - בלי קונטרול!
+        if current_sentence.strip():
+            last_saved_sentence = current_sentence  
+            with open("exported_sentences.txt", "a", encoding="utf-8") as txt_file:
+                txt_file.write(current_sentence + "\n")
+            print(f"Saved: {current_sentence}")
+            current_sentence = ""  
 
 cap.release()
 cv2.destroyAllWindows()
